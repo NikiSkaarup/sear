@@ -3,6 +3,7 @@ package network
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -29,6 +30,11 @@ func NewManager(tapDevice, tapIP, gatewayIP string) *Manager {
 // Setup configures the network for the VM
 func (m *Manager) Setup() error {
 	logrus.Info("Setting up network...")
+
+	// Check if running as root
+	if !m.isRoot() {
+		return fmt.Errorf("network setup requires root privileges. Please run with sudo:\nsudo %s run <profile>", os.Args[0])
+	}
 
 	// Detect host interface
 	hostInterface, err := m.detectHostInterface()
@@ -77,12 +83,28 @@ func (m *Manager) Teardown() error {
 
 // setupTAPDevice creates and configures the TAP device
 func (m *Manager) setupTAPDevice() error {
-	// Remove existing TAP device
-	_ = m.runCommand("ip", "link", "del", m.TAPDevice)
+	logrus.Infof("Setting up TAP device: %s", m.TAPDevice)
+
+	// Check if TAP device already exists
+	exists, err := m.checkDeviceExists(m.TAPDevice)
+	if err != nil {
+		logrus.Warnf("Failed to check if TAP device exists: %v", err)
+	}
+
+	if exists {
+		logrus.Infof("TAP device %s already exists, removing it first", m.TAPDevice)
+		_ = m.runCommand("ip", "link", "del", m.TAPDevice)
+	}
 
 	// Create TAP device
 	if err := m.runCommand("ip", "tuntap", "add", "dev", m.TAPDevice, "mode", "tap"); err != nil {
-		return fmt.Errorf("failed to create TAP device: %w", err)
+		// Check if it was created anyway (might happen with permissions)
+		exists, checkErr := m.checkDeviceExists(m.TAPDevice)
+		if checkErr == nil && exists {
+			logrus.Warnf("TAP device %s created despite error (likely permissions), continuing...", m.TAPDevice)
+		} else {
+			return fmt.Errorf("failed to create TAP device: %w (hint: this usually requires root permissions)", err)
+		}
 	}
 
 	// Configure IP address
@@ -95,8 +117,25 @@ func (m *Manager) setupTAPDevice() error {
 		return fmt.Errorf("failed to bring up TAP device: %w", err)
 	}
 
-	logrus.Infof("TAP device %s configured", m.TAPDevice)
+	logrus.Infof("TAP device %s configured successfully", m.TAPDevice)
 	return nil
+}
+
+// checkDeviceExists checks if a network device exists
+func (m *Manager) checkDeviceExists(deviceName string) (bool, error) {
+	output, err := exec.Command("ip", "link", "show", deviceName).Output()
+	if err != nil {
+		if strings.Contains(string(output), "Device does not exist") {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(output) > 0, nil
+}
+
+// isRoot checks if the process is running as root
+func (m *Manager) isRoot() bool {
+	return os.Getuid() == 0
 }
 
 // removeTAPDevice removes the TAP device

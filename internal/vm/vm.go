@@ -14,10 +14,11 @@ import (
 
 // VM represents a Firecracker microVM
 type VM struct {
-	profile    config.Profile
-	fcClient   *firecracker.Client
-	netManager *network.Manager
-	sshClient  *SSHClient
+	profile     config.Profile
+	fcClient    *firecracker.Client
+	netManager  *network.Manager
+	sshClient   *SSHClient
+	userHomeDir string
 }
 
 // SSHClient wraps the SSH client for VM interaction
@@ -37,8 +38,11 @@ func (c *SSHClient) Shell() error {
 
 // NewVM creates a new VM instance
 func NewVM(profile config.Profile) (*VM, error) {
+	userHome, _ := os.UserHomeDir()
+
 	return &VM{
-		profile: profile,
+		profile:     profile,
+		userHomeDir: userHome,
 	}, nil
 }
 
@@ -124,11 +128,9 @@ func (v *VM) Stop() error {
 func (v *VM) GetSSHClient() (*SSHClient, error) {
 	networkConfig := v.getEffectiveNetworkConfig()
 
-	// Get SSH key path from config
 	sshKeyPath := "sear_key"
-	configHome, err := os.UserHomeDir()
-	if err == nil {
-		sshKeyPath = filepath.Join(configHome, ".config", "sear", "sear_key")
+	if v.userHomeDir != "" {
+		sshKeyPath = filepath.Join(v.userHomeDir, ".config", "sear", "sear_key")
 	}
 
 	sshClient := ssh.NewClient(

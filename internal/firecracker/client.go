@@ -74,7 +74,7 @@ func (c *Client) request(method, endpoint string, data interface{}) error {
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("API request failed with status: %d", resp.StatusCode)
 	}
 
